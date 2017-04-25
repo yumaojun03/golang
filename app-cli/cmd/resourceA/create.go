@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cmd
+package resourceA
 
 import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-
-	"golang/app-cli/cmd/resourceA"
 )
 
-// resourceACmd represents the resourceA command
-var resourceACmd = &cobra.Command{
-	Use:   "resourceA",
-	Short: "A brief description of your command",
+// CreateCmd represents the resourceA command
+var CreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "create an resource",
 	Long: `A longer description that spans multiple lines and likely contains examples
 and usage of using your command. For example:
 
@@ -39,11 +37,5 @@ to quickly create a Cobra application.`,
 }
 
 func init() {
-	RootCmd.AddCommand(resourceACmd)
-	resourceACmd.AddCommand(resourceA.CreateCmd,
-		resourceA.ListCmd,
-		resourceA.GetCmd,
-		resourceA.UpdateCmd,
-		resourceA.DeleteCmd)
 
 }
