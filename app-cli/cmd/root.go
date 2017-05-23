@@ -26,14 +26,15 @@ import (
 )
 
 var (
-	user           string
-	pass           string
-	project        string
-	domian         string
-	domianProject  string
-	authURL        string
-	authVersino    string
-	uniresEndPoint string
+	user            string
+	pass            string
+	project         string
+	domian          string
+	domianProject   string
+	authURL         string
+	authVersino     string
+	serviceEndPoint string
+	serviceName     string
 )
 
 // RootCmd represents the base command when called without any subcommands
@@ -58,8 +59,8 @@ in your os environment or pass them through Global Flags!`
 		return errors.New(err)
 	}
 
-	if uniresEndPoint == "" {
-		return errors.New("miss unires service endpoint address")
+	if serviceEndPoint == "" && serviceName == "" {
+		serviceName = "keystoneServiceName"
 	}
 
 	client, err := keystone.NewClient(authURL)
@@ -67,14 +68,14 @@ in your os environment or pass them through Global Flags!`
 		return err
 	}
 
-	auth := keystone.NewAuth(user, pass, domian)
+	auth := keystone.NewAuth(user, pass, domian, project)
 	token, err := client.GetToken(auth)
 	if err != nil {
 		return err
 	}
 
 	common.GlobalFlag.SetToken(token)
-	common.GlobalFlag.SetEndPoint(uniresEndPoint)
+	common.GlobalFlag.SetKeystoneURL(authURL)
 
 	return nil
 }
@@ -94,7 +95,9 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&project, "project-name", os.Getenv("OS_PROJECT_NAME"), "keystone auth user project name")
 	RootCmd.PersistentFlags().StringVar(&domian, "user-domain-name", os.Getenv("OS_USER_DOMAIN_NAME"), "keystone auth user domain name")
 	RootCmd.PersistentFlags().StringVar(&domianProject, "project-domain-name", os.Getenv("OS_PROJECT_DOMAIN_NAME"), "keystone auth user project domain")
-	RootCmd.PersistentFlags().StringVar(&authURL, "auth_url", os.Getenv("OS_AUTH_URL"), "keyston auth url")
+	RootCmd.PersistentFlags().StringVar(&authURL, "auth-url", os.Getenv("OS_AUTH_URL"), "keyston auth url")
 	RootCmd.PersistentFlags().StringVar(&authVersino, "idenntity-api-version", os.Getenv("OS_IDENTITY_API_VERSION"), "keystone auth version")
-	RootCmd.PersistentFlags().StringVar(&uniresEndPoint, "api-endpoint", os.Getenv("UNIRES_ENDPOINT"), "unires service endpoint")
+	RootCmd.PersistentFlags().StringVar(&serviceEndPoint, "api-endpoint", os.Getenv("SERVICE_ENDPOIN"), "service endpoint")
+	RootCmd.PersistentFlags().StringVar(&serviceName, "service-name", os.Getenv("SERVICE_NAME"), "keystone service name")
+
 }

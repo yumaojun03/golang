@@ -22,10 +22,18 @@ type Identity struct {
 	Methods  []string     `json:"methods"`
 	Password IdentifyUser `json:"password"`
 }
+type Scope struct {
+	Project Project `json:"project"`
+}
+type Project struct {
+	Name   string `json:"name"`
+	Domain Domain `json:"domain"`
+}
 
 // Auth with ID
 type Auth struct {
 	Identity Identity `json:"identity"`
+	Scope    Scope    `json:"scope"`
 }
 
 // SingleAuth for password
@@ -34,7 +42,7 @@ type SingleAuth struct {
 }
 
 // NewAuth use to new auth
-func NewAuth(username, password, domainName string) Auth {
+func NewAuth(username, password, domainName, projectName string) Auth {
 	return Auth{
 		Identity: Identity{
 			Methods: []string{"password"},
@@ -44,6 +52,12 @@ func NewAuth(username, password, domainName string) Auth {
 					Password: password,
 					Domain:   Domain{Name: domainName},
 				},
+			},
+		},
+		Scope: Scope{
+			Project: Project{
+				Name:   projectName,
+				Domain: Domain{Name: domainName},
 			},
 		},
 	}
