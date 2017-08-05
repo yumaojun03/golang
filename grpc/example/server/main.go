@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "golang/grpc/example/pb"
-	grpclb "golang/grpc/service"
+	grpclb "golang/grpc/lb"
 )
 
 var (

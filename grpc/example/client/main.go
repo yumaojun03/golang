@@ -6,7 +6,7 @@ import (
 	"time"
 
 	pb "golang/grpc/example/pb"
-	grpclb "golang/grpc/service"
+	grpclb "golang/grpc/lb"
 	"strconv"
 
 	"golang.org/x/net/context"
