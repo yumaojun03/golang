@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	pb "golang/grpc/example/pb"
-	grpclb "golang/grpc/lb"
+	pb "golang/grpclb/example/pb"
+	grpclb "golang/grpclb/lb"
 	"strconv"
 
 	"golang.org/x/net/context"

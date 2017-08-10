@@ -13,8 +13,8 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
-	pb "golang/grpc/example/pb"
-	grpclb "golang/grpc/lb"
+	pb "golang/grpclb/example/pb"
+	grpclb "golang/grpclb/lb"
 )
 
 var (
