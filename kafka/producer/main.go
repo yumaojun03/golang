@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"math/rand"
@@ -18,9 +19,15 @@ import (
 var (
 	wg sync.WaitGroup
 
-	kafkaAddr = "172.21.3.13:9092,172.21.3.14:9092,172.21.3.15:9092"
-	topic     = "yumaojun-performance-test"
-	logger    = log.New(os.Stderr, "[srama]", log.LstdFlags)
+	logger = log.New(os.Stderr, "[device-mock-tool]", log.LstdFlags)
+
+	numbers      = flag.Int("numbers", 50, "模拟多少台设备.")
+	pointNumbers = flag.Int("points", 300, "每台设备模拟多少个点位.")
+	kafkaAddr    = flag.String("kafka", "172.21.3.13:9092,172.21.3.14:9092,172.21.3.15:9092", "数据发往kafka的地址.")
+	topic        = flag.String("topic", "mock-devices-default", "发往kafka的那个topic")
+	partitions   = flag.Int("partitions", 16, "Kafka对应topic的分区数量.")
+	frequency    = flag.Int("frequency", 5, "每个设备数据发送的间隔, 单位为秒.")
+	isSyncSend   = flag.Bool("sync", false, "发送数据模式, 为了高效, 默认异步发送.")
 )
 
 type fullData struct {
@@ -46,42 +53,85 @@ type point struct {
 	Quality float32 `json:"quality"`
 }
 
-/*
-200 device * 300 point
-data = `{
-		"cf688ac1af5f43b38f586aefcc8ff135": {
-		  "msgtype": "devicedata",
-		  "at": 1503646078,
-		  "debugmode": "off",
-		  "path": "cf688ac1af5f43b38f586aefcc8ff135/ec8211db5d6944eb9057aa12b46894eb/0292e9e9fd4645c8af19ac26747839f9/colin7/087a64568e1a4edda4b53a8d7bf8b3f9",
-		  "data": {
-			"msgtype": "devicedata",
-			"debugmode": "off",
-			"at": 1503646078,
-			"type": "fan"
-			"tag": [
-			  "quality"
-			],
-			"datastream": [
-			  {
-				"id": "random1",
-				"value": 3.982,
-				"quality": 192
-			  },
-			  {
-				"id": "random2",
-				"value": 9.726,
-				"quality": 192
-			  }
-			]
-		  }
+// DeviceMockTool 用于模拟设备, 将数据写入kafka.
+// 设备数据的设备类型就是kafka的topic, 设备会被水平
+// 分区地放到每个分区里面.
+// 模拟的数据格式大致如下:
+// data = `{
+// 	"cf688ac1af5f43b38f586aefcc8ff135": {
+// 	  "msgtype": "devicedata",
+// 	  "at": 1503646078,
+// 	  "debugmode": "off",
+// 	  "path": "cf688ac1af5f43b38f586aefcc8ff135/ec8211db5d6944eb9057aa12b46894eb/0292e9e9fd4645c8af19ac26747839f9/colin7/087a64568e1a4edda4b53a8d7bf8b3f9",
+// 	  "data": {
+// 		"msgtype": "devicedata",
+// 		"debugmode": "off",
+// 		"at": 1503646078,
+// 		"type": "fan"
+// 		"tag": [
+// 		  "quality"
+// 		],
+// 		"datastream": [
+// 		  {
+// 			"id": "random1",
+// 			"value": 3.982,
+// 			"quality": 192
+// 		  },
+// 		  {
+// 			"id": "random2",
+// 			"value": 9.726,
+// 			"quality": 192
+// 		  }
+// 		]
+// 	  }
+// 	}
+//   }`
+type DeviceMockTool struct {
+	deviceIDs []string
+}
+
+// NewDeviceMockTool 创建一个模拟工具实例
+func NewDeviceMockTool() *DeviceMockTool {
+	dmt := DeviceMockTool{}
+
+	fmt.Printf("aaa: %d", *numbers)
+	for i := 0; i < *numbers; i++ {
+		dmt.deviceIDs = append(dmt.deviceIDs, uuid.NewV4().String())
+	}
+
+	return &dmt
+}
+
+// ShowDeviceIDs 打印出模拟的设备的deviceID方便追踪
+func (tool *DeviceMockTool) ShowDeviceIDs() {
+	fmt.Println("--------------设备ID-----------------")
+	for _, did := range tool.deviceIDs {
+		fmt.Println(did)
+	}
+	fmt.Println("------------------------------------")
+}
+
+// Start 启动模拟
+func (tool *DeviceMockTool) Start() {
+
+	tool.ShowDeviceIDs()
+
+	for _, did := range tool.deviceIDs {
+		wg.Add(1)
+		if *isSyncSend {
+			go tool.syncProducer(did)
+		} else {
+			go tool.asyncProducer(did)
 		}
-	  }`
-*/
-func mockData(did string) (*map[string]*fullData, error) {
+	}
+
+	wg.Wait()
+}
+
+func (tool *DeviceMockTool) mockData(did string) (*map[string]*fullData, error) {
 
 	points := []*point{}
-	for i := 0; i < 300; i++ {
+	for i := 0; i < *pointNumbers; i++ {
 		p := &point{
 			ID:      "random" + strconv.Itoa(i),
 			Value:   rand.Float32() * 100,
@@ -93,7 +143,7 @@ func mockData(did string) (*map[string]*fullData, error) {
 
 	msgtype := "devicedata"
 	debugmode := "off"
-	dType := "fan"
+	dType := *topic
 	tag := []string{"quality"}
 	path := "cf688ac1af5f43b38f586aefcc8ff135/ec8211db5d6944eb9057aa12b46894eb/0292e9e9fd4645c8af19ac26747839f9/colin7/087a64568e1a4edda4b53a8d7bf8b3f9"
 
@@ -105,11 +155,11 @@ func mockData(did string) (*map[string]*fullData, error) {
 	return &data, nil
 }
 
-func asyncProducer(did string) {
+func (tool *DeviceMockTool) asyncProducer(did string) {
 	config := sarama.NewConfig()
 	config.Producer.Return.Successes = true //必须有这个选项
 	config.Producer.Timeout = 5 * time.Second
-	p, err := sarama.NewAsyncProducer(strings.Split(kafkaAddr, ","), config)
+	p, err := sarama.NewAsyncProducer(strings.Split(*kafkaAddr, ","), config)
 	defer p.Close()
 	if err != nil {
 		return
@@ -138,7 +188,7 @@ func asyncProducer(did string) {
 			var data *map[string]*fullData
 			var err error
 
-			data, err = mockData(did)
+			data, err = tool.mockData(did)
 			if err != nil {
 				fmt.Printf("mock data error!, %s\n", err.Error())
 				data = &map[string]*fullData{"cf688ac1af5f43b38f586aefcc8ff135": &fullData{}}
@@ -149,9 +199,9 @@ func asyncProducer(did string) {
 				fmt.Printf("dump to json error, %s", err.Error())
 			} else {
 				msg := &sarama.ProducerMessage{}
-				msg.Topic = topic
-				msg.Partition = int32(-1)
-				msg.Key = sarama.StringEncoder("my-fan-01")
+				msg.Topic = *topic
+				msg.Partition = int32(*numbers % *partitions)
+				msg.Key = sarama.StringEncoder("device-mock-tool")
 				msg.Value = sarama.ByteEncoder(sendData)
 
 				v := "async: " + strconv.Itoa(rand.New(rand.NewSource(time.Now().UnixNano())).Intn(10000))
@@ -166,7 +216,7 @@ func asyncProducer(did string) {
 
 }
 
-func syncProducer(did string) {
+func (tool *DeviceMockTool) syncProducer(did string) {
 
 	sarama.Logger = logger
 	config := sarama.NewConfig()
@@ -183,7 +233,7 @@ func syncProducer(did string) {
 			var data *map[string]*fullData
 			var err error
 
-			data, err = mockData(did)
+			data, err = tool.mockData(did)
 			if err != nil {
 				fmt.Printf("mock data error!, %s\n", err.Error())
 				data = &map[string]*fullData{"cf688ac1af5f43b38f586aefcc8ff135": &fullData{}}
@@ -196,12 +246,12 @@ func syncProducer(did string) {
 			}
 
 			msg := &sarama.ProducerMessage{}
-			msg.Topic = topic
-			msg.Partition = int32(-1)
-			msg.Key = sarama.StringEncoder("my-fan-01")
+			msg.Topic = *topic
+			msg.Partition = int32(*numbers % *partitions)
+			msg.Key = sarama.StringEncoder("device-mock-tool")
 			msg.Value = sarama.ByteEncoder(sendData)
 
-			producer, err := sarama.NewSyncProducer(strings.Split("172.21.3.13:9092,172.21.3.14:9092,172.21.3.15:9092", ","), config)
+			producer, err := sarama.NewSyncProducer(strings.Split(*kafkaAddr, ","), config)
 			if err != nil {
 				logger.Printf("Failed to produce message: %s", err)
 				os.Exit(1)
@@ -222,15 +272,9 @@ func syncProducer(did string) {
 }
 
 func main() {
-	dids := []string{}
-	for i := 0; i < 50; i++ {
-		dids = append(dids, uuid.NewV4().String())
-	}
-	fmt.Println(dids)
+	flag.Parse()
 
-	for _, did := range dids {
-		wg.Add(1)
-		go asyncProducer(did)
-	}
-	wg.Wait()
+	dmt := NewDeviceMockTool()
+
+	dmt.Start()
 }
