@@ -42,7 +42,7 @@ type rowData struct {
 	MsgType    string   `json:"msgtype"`
 	DebugMode  string   `json:"debugmode"`
 	At         int64    `json:"at"`
-	Type       string   `json:"fan"`
+	Type       string   `json:"type"`
 	Tag        []string `json:"tag"`
 	DataStream []*point `json:"datastream"`
 }
@@ -179,7 +179,7 @@ func (tool *DeviceMockTool) mockData(did string) (*map[string]*fullData, error) 
 
 	msgtype := "devicedata"
 	debugmode := "off"
-	dType := *topic
+	dType := "fan"
 	tag := []string{"quality"}
 	path := "cf688ac1af5f43b38f586aefcc8ff135/ec8211db5d6944eb9057aa12b46894eb/0292e9e9fd4645c8af19ac26747839f9/colin7/087a64568e1a4edda4b53a8d7bf8b3f9"
 
