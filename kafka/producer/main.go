@@ -152,6 +152,14 @@ func (tool *DeviceMockTool) Start() {
 		} else {
 			go tool.asyncProducer(did)
 		}
+
+		// 避免Goroutine同时启动, 因为Goroutine内有timer
+		st := (*frequency) * 100 / (*numbers)
+		if st > 0 {
+			time.Sleep(time.Microsecond * time.Duration(st))
+		} else {
+			time.Sleep(time.Microsecond * 1)
+		}
 	}
 	wg.Wait()
 }
@@ -223,11 +231,8 @@ func (tool *DeviceMockTool) asyncProducer(did string) {
 				msg.Value = sarama.ByteEncoder(sendData)
 				msg.Key = sarama.StringEncoder("device" + string(tool.deviceIDs[did]%*partitions))
 
-				v := "async: " + strconv.Itoa(rand.New(rand.NewSource(time.Now().UnixNano())).Intn(10000))
-				fmt.Fprintln(os.Stdout, v)
-
-				fmt.Println(msg.Partition)
 				tool.ap.Input() <- msg
+				logger.Printf("<async> did=%s, partition=%d\n", did, msg.Partition)
 			}
 
 			t1.Reset(time.Second * time.Duration(*frequency))
@@ -268,7 +273,7 @@ func (tool *DeviceMockTool) syncProducer(did string) {
 				logger.Println("Failed to produce message: ", err)
 			}
 
-			logger.Printf("partition=%d, offset=%d\n", partition, offset)
+			logger.Printf("<sync> did=%s, partition=%d, offset=%d\n", did, partition, offset)
 			t1.Reset(time.Second * time.Duration(*frequency))
 		}
 	}
