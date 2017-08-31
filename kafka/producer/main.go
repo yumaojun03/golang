@@ -25,7 +25,7 @@ var (
 	pointNumbers = flag.Int("points", 300, "每台设备模拟多少个点位.")
 	kafkaAddr    = flag.String("kafka", "172.21.3.13:9092,172.21.3.14:9092,172.21.3.15:9092", "数据发往kafka的地址.")
 	topic        = flag.String("topic", "mock-devices-default", "发往kafka的那个topic")
-	partitions   = flag.Int("partitions", 16, "Kafka对应topic的分区数量.")
+	partitions   = flag.Int("partitions", 16, "Kafka对应topic的分区数量. 其提前修改kafka配置让其partition大于16")
 	frequency    = flag.Int("frequency", 5, "每个设备数据发送的间隔, 单位为秒.")
 	isSyncSend   = flag.Bool("sync", false, "发送数据模式, 为了高效, 默认异步发送.")
 )
@@ -87,25 +87,54 @@ type point struct {
 // 	}
 //   }`
 type DeviceMockTool struct {
-	deviceIDs []string
+	deviceIDs map[string]int
+	ap        sarama.AsyncProducer
+	sp        sarama.SyncProducer
 }
 
 // NewDeviceMockTool 创建一个模拟工具实例
-func NewDeviceMockTool() *DeviceMockTool {
+func NewDeviceMockTool() (*DeviceMockTool, error) {
 	dmt := DeviceMockTool{}
 
-	fmt.Printf("aaa: %d", *numbers)
+	dids := map[string]int{}
 	for i := 0; i < *numbers; i++ {
-		dmt.deviceIDs = append(dmt.deviceIDs, uuid.NewV4().String())
+		dids[uuid.NewV4().String()] = i
+	}
+	dmt.deviceIDs = dids
+
+	sarama.Logger = logger
+	config := sarama.NewConfig()
+
+	config.Producer.Return.Successes = true
+	config.Producer.Partitioner = sarama.NewManualPartitioner
+
+	if *isSyncSend {
+
+		config.Producer.RequiredAcks = sarama.WaitForAll
+		sp, err := sarama.NewSyncProducer(strings.Split(*kafkaAddr, ","), config)
+		if err != nil {
+			return nil, err
+		}
+
+		dmt.sp = sp
+	} else {
+		config.Producer.Timeout = 5 * time.Second
+
+		ap, err := sarama.NewAsyncProducer(strings.Split(*kafkaAddr, ","), config)
+		if err != nil {
+			return nil, err
+		}
+
+		dmt.ap = ap
 	}
 
-	return &dmt
+	return &dmt, nil
 }
 
 // ShowDeviceIDs 打印出模拟的设备的deviceID方便追踪
 func (tool *DeviceMockTool) ShowDeviceIDs() {
 	fmt.Println("--------------设备ID-----------------")
-	for _, did := range tool.deviceIDs {
+	for did := range tool.deviceIDs {
 		fmt.Println(did)
 	}
 	fmt.Println("------------------------------------")
@@ -116,7 +145,7 @@ func (tool *DeviceMockTool) Start() {
 
 	tool.ShowDeviceIDs()
 
-	for _, did := range tool.deviceIDs {
+	for did := range tool.deviceIDs {
 		wg.Add(1)
 		if *isSyncSend {
 			go tool.syncProducer(did)
@@ -124,7 +153,6 @@ func (tool *DeviceMockTool) Start() {
 			go tool.asyncProducer(did)
 		}
 	}
-
 	wg.Wait()
 }
 
@@ -156,15 +184,6 @@ func (tool *DeviceMockTool) mockData(did string) (*map[string]*fullData, error) 
 }
 
 func (tool *DeviceMockTool) asyncProducer(did string) {
-	config := sarama.NewConfig()
-	config.Producer.Return.Successes = true //必须有这个选项
-	config.Producer.Timeout = 5 * time.Second
-	p, err := sarama.NewAsyncProducer(strings.Split(*kafkaAddr, ","), config)
-	defer p.Close()
-	if err != nil {
-		return
-	}
-
 	//必须有这个匿名函数内容
 	go func(p sarama.AsyncProducer) {
 		errors := p.Errors()
@@ -178,9 +197,9 @@ func (tool *DeviceMockTool) asyncProducer(did string) {
 			case <-success:
 			}
 		}
-	}(p)
+	}(tool.ap)
 
-	t1 := time.NewTimer(time.Second * 1)
+	t1 := time.NewTimer(time.Second * time.Duration(*frequency))
 
 	for {
 		select {
@@ -200,32 +219,25 @@ func (tool *DeviceMockTool) asyncProducer(did string) {
 			} else {
 				msg := &sarama.ProducerMessage{}
 				msg.Topic = *topic
-				msg.Partition = int32(*numbers % *partitions)
-				msg.Key = sarama.StringEncoder("device-mock-tool")
+				msg.Partition = int32(tool.deviceIDs[did] % *partitions)
 				msg.Value = sarama.ByteEncoder(sendData)
+				msg.Key = sarama.StringEncoder("device" + string(tool.deviceIDs[did]%*partitions))
 
 				v := "async: " + strconv.Itoa(rand.New(rand.NewSource(time.Now().UnixNano())).Intn(10000))
 				fmt.Fprintln(os.Stdout, v)
 
-				p.Input() <- msg
+				fmt.Println(msg.Partition)
+				tool.ap.Input() <- msg
 			}
 
-			t1.Reset(time.Second * 1)
+			t1.Reset(time.Second * time.Duration(*frequency))
 		}
 	}
 
 }
 
 func (tool *DeviceMockTool) syncProducer(did string) {
-
-	sarama.Logger = logger
-	config := sarama.NewConfig()
-
-	config.Producer.Return.Successes = true
-	config.Producer.RequiredAcks = sarama.WaitForAll
-	config.Producer.Partitioner = sarama.NewRandomPartitioner
-
-	t1 := time.NewTimer(time.Second * 1)
+	t1 := time.NewTimer(time.Second * time.Duration(*frequency))
 
 	for {
 		select {
@@ -247,25 +259,17 @@ func (tool *DeviceMockTool) syncProducer(did string) {
 
 			msg := &sarama.ProducerMessage{}
 			msg.Topic = *topic
-			msg.Partition = int32(*numbers % *partitions)
-			msg.Key = sarama.StringEncoder("device-mock-tool")
+			msg.Partition = int32(tool.deviceIDs[did] % *partitions)
 			msg.Value = sarama.ByteEncoder(sendData)
+			msg.Key = sarama.StringEncoder("device" + string(tool.deviceIDs[did]%*partitions))
 
-			producer, err := sarama.NewSyncProducer(strings.Split(*kafkaAddr, ","), config)
-			if err != nil {
-				logger.Printf("Failed to produce message: %s", err)
-				os.Exit(1)
-			}
-
-			defer producer.Close()
-
-			partition, offset, err := producer.SendMessage(msg)
+			partition, offset, err := tool.sp.SendMessage(msg)
 			if err != nil {
 				logger.Println("Failed to produce message: ", err)
 			}
 
 			logger.Printf("partition=%d, offset=%d\n", partition, offset)
-			t1.Reset(time.Second * 1)
+			t1.Reset(time.Second * time.Duration(*frequency))
 		}
 	}
 
@@ -274,7 +278,11 @@ func (tool *DeviceMockTool) syncProducer(did string) {
 func main() {
 	flag.Parse()
 
-	dmt := NewDeviceMockTool()
+	dmt, err := NewDeviceMockTool()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 
 	dmt.Start()
 }

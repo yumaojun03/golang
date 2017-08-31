@@ -128,6 +128,7 @@ func (ip *InfluxDBPlugin) save(data []byte) error {
 // startPC 用于为每个Partition 启用一个Goroutine
 func (ip *InfluxDBPlugin) startPC() error {
 	partitionList, err := ip.consumer.Partitions(*topic)
+	fmt.Println(partitionList)
 	if err != nil {
 		return fmt.Errorf("failed to get the topic:%s of partitions: %s", *topic, err)
 	}
@@ -169,6 +170,7 @@ func (ip *InfluxDBPlugin) startWorker(cmchan <-chan *sarama.ConsumerMessage, pc 
 		if err := ip.save(msg.Value); err != nil {
 			fmt.Printf("save to influxDB error, %s", err)
 		}
+		fmt.Println(msg.Partition)
 	}
 }
 
